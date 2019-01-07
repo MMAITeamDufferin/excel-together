@@ -37,9 +37,12 @@ X_train = df[:int(train*df.shape[0])+1:,::,[i not in [1] for i in range(df.shape
 X_val = df[int(train*df.shape[0])+1:int(train*df.shape[0])+int(val*df.shape[0])+1:,::,[i not in [1] for i in range(df.shape[2])]]
 X_test = df[int(train*df.shape[0])+int(val*df.shape[0])+1::,::,[i not in [1] for i in range(df.shape[2])]]
 
-y_train = df[:int(train*df.shape[0])+1:,::,1:2:]
-y_val = df[int(train*df.shape[0])+1:int(train*df.shape[0])+int(val*df.shape[0])+1:,::,1:2:]
-y_test = df[int(train*df.shape[0])+int(val*df.shape[0])+1::,::,1:2:]
+oh_target = (np.arange(df[:,0,1].max()+1) == df[:,0,1][...,None]).astype(int)
+oh_target = np.delete(oh_target,np.where(~oh_target.any(axis=0))[0], axis=1)
+
+y_train = oh_target[:int(train*oh_target.shape[0])+1:,]
+y_val = oh_target[int(train*oh_target.shape[0])+1:int(train*oh_target.shape[0])+int(val*oh_target.shape[0])+1:,]
+y_test = oh_target[int(train*oh_target.shape[0])+int(val*oh_target.shape[0])+1::,]
 
 
 """
