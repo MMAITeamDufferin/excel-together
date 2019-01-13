@@ -1,3 +1,7 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -5,7 +9,7 @@ from scipy.ndimage import zoom
 import os
 import tensorflow as tf
 
-# Extract http://archive.ics.uci.edu/ml/machine-learning-databases/00447/ to same directory as this script
+# Extract http://archive.ics.uci.edu/ml/machine-learning-databases/00447/ to folder named 'data' in same directory as this script
 
 # List files
 one = ['.\\data\\TS1.txt', '.\\data\\TS2.txt', '.\\data\\TS3.txt', '.\\data\\TS4.txt', '.\\data\\VS1.txt', '.\\data\\CE.txt', '.\\data\\CP.txt', '.\\data\\SE.txt']
@@ -30,6 +34,10 @@ df_hundred = np.stack([pd.read_table(x, header=None) for x in hundred], axis=2)
 
 # Concatenate all data
 df = np.concatenate([df_profile, df_one, df_ten, df_hundred], axis=2)
+
+# Lines to randomly shuffle data in samples dimension
+# ind = np.random.permutation(df.shape[0])
+# df = df[ind,::,::]
 
 # Split data into training, validation, and test sets
 val = 0.2
@@ -56,13 +64,14 @@ samples, seq_len, features = X_train.shape
 n_classes = y_train.shape[1]
 
 # Hyperparameters
-lstm_size = 3*features
+lstm_size = 60
 lstm_layers = 2
-dropout = 0.8
-batch_size = 50
-learning_rate = 0.0001  # default is 0.001
-epochs = 1
+dropout = 0.7
+batch_size = 30
+learning_rate = 0.005  # default is 0.001
+epochs = 7
 
+# Build TensorFlow Graph
 graph = tf.Graph()
 
 with graph.as_default():
@@ -82,7 +91,7 @@ with graph.as_default():
     lstm_in = tf.split(lstm_in, seq_len, 0)
 
     # Add LSTM layers
-    lstm = tf.contrib.rnn.BasicLSTMCell(lstm_size)
+    lstm = tf.nn.rnn_cell.LSTMCell(lstm_size)
     drop = tf.contrib.rnn.DropoutWrapper(lstm, output_keep_prob=keep_prob)
     cell = tf.contrib.rnn.MultiRNNCell([drop] * lstm_layers)
     initial_state = cell.zero_state(batch_size, tf.float32)
@@ -94,7 +103,7 @@ with graph.as_default():
     logits = tf.layers.dense(outputs[-1], n_classes, name='logits')
 
     # Cost function and optimizer
-    cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=target))
+    cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=tf.stop_gradient(target)))
 
     # No grad clipping
     # optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
@@ -110,6 +119,15 @@ with graph.as_default():
     correct_pred = tf.equal(tf.argmax(logits, 1), tf.argmax(target, 1))
     accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32), name='accuracy')
 
+# Code for TensorBoard
+# with graph.as_default():
+#     tf.summary.scalar('loss', cost)
+#     tf.summary.scalar('accuracy', accuracy)
+#     merged = tf.summary.merge_all()
+
+# if (os.path.exists('log_tb') == False):
+#     os.system('mkdir log_tb')
+
 if (os.path.exists('checkpoints') == False):
     os.system('mkdir checkpoints')
 
@@ -123,8 +141,14 @@ with graph.as_default():
     saver = tf.train.Saver()
 
 with tf.Session(graph=graph) as sess:
+    # Code for TensorBoard
+    # writer = tf.summary.FileWriter('.\\log_tb', sess.graph)
+    # summary = sess.run([merged, optimizer], feed_dict={
+    # writer.add_graph(tf.get_default_graph())
+    # writer.flush()
+
     sess.run(tf.global_variables_initializer())
-    iteration = 1
+    iteration = 0
 
     for e in range(epochs):
         # Initialize
@@ -132,12 +156,14 @@ with tf.Session(graph=graph) as sess:
 
         # Loop over batches
         for x, y in sample_batch(X_train, y_train, batch_size):
+            iteration += 1
 
             # Feed dictionary
             feed = {inputs: x, target: y, keep_prob: dropout, initial_state: state}
 
             loss, _, state, acc = sess.run([cost, optimizer, final_state, accuracy],
                                            feed_dict=feed)
+
             train_acc.append(acc)
             train_loss.append(loss)
 
@@ -176,10 +202,74 @@ with tf.Session(graph=graph) as sess:
                 validation_acc.append(np.mean(val_acc_))
                 validation_loss.append(np.mean(val_loss_))
 
-            # Iterate
-            iteration += 1
-
     saver.save(sess, "checkpoints/lstm.ckpt")
+
+    # Plot training and validation loss
+    t = np.arange(iteration) + 1
+
+    plt.figure(figsize = (6,6))
+    plt.plot(t, np.array(train_loss), 'r-', t[t % 25 == 0], np.array(validation_loss), 'b*')
+    plt.xlabel("Iteration")
+    plt.ylabel("Loss")
+    plt.legend(['train', 'validation'], loc='upper right')
+    plt.show()
+
+    # Plot Accuracies
+    plt.figure(figsize = (6,6))
+
+    plt.plot(t, np.array(train_acc), 'r-', t[t % 25 == 0], np.array(validation_acc), 'b*')
+    plt.xlabel("Iteration")
+    plt.ylabel("Accuracy")
+    plt.legend(['train', 'validation'], loc='upper right')
+    plt.show()
+
+# Attempt to run trained model on test data results in error:
+# ValueError: Fetch argument <tf.Tensor 'MultiRNNCellZeroState/DropoutWrapperZeroState/LSTMCellZeroState/zeros:0' shape=(40, 50) dtype=float32> cannot be interpreted as a Tensor.
+# (Tensor Tensor("MultiRNNCellZeroState/DropoutWrapperZeroState/LSTMCellZeroState/zeros:0", shape=(40, 50), dtype=float32) is not an element of this graph.)
+
+# test_acc = []
+# test_loss = []
+#
+# # Run the trained model on the test data
+# with tf.Session() as sess:
+#     sess.run(tf.global_variables_initializer())
+#     iteration = 0
+#
+#     # Initialize
+#     state = sess.run(initial_state)
+#
+#     for x, y in sample_batch(X_test, y_test, batch_size):
+#         iteration += 1
+#
+#         # Feed dictionary
+#         feed = {inputs: x, target: y, keep_prob: dropout, initial_state: state}
+#
+#         # saver = tf.train.Saver()
+#         saver.restore(sess, ".\\checkpoints")
+#         loss, _, state, acc = sess.run([cost, optimizer, final_state, accuracy],
+#                                    feed_dict=feed)
+#
+#         test_acc.append(acc)
+#         test_loss.append(loss)
+#
+#         # Print at each iters
+#         if (iteration % 1 == 0):
+#             print("Iteration: {:d}".format(iteration),
+#                   "Train loss: {:6f}".format(loss),
+#                   "Train acc: {:.6f}".format(acc))
+#
+#     t = np.arange(iteration) + 1
+#
+#     plt.figure(figsize = (6,6))
+#     plt.plot(t, np.array(test_loss), 'r-', t[t % 25 == 0], np.array(test_acc), 'b*')
+#     plt.xlabel("Iteration")
+#     plt.ylabel("Loss")
+#     plt.legend(['test_loss', 'test_acc'], loc='upper right')
+#     plt.show()
+
+# For TensorBoard run in terminal:
+# $ tensorboard --logdir log_tb
+# go to http://localhost:6006/#graphs in web browser
 
 """
 references:
